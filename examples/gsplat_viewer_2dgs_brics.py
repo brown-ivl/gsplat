@@ -437,7 +437,12 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                     multis.append(p.parent.name)
         except Exception:
             pass
-        multis.sort()
+        # Natural numeric sort by trailing digits, but keep exact names unchanged
+        import re
+        def _key(name: str):
+            m = re.search(r"(\d+)$", name)
+            return (int(m.group(1)) if m else -1, name)
+        multis.sort(key=_key)
         if self._max_multis is not None and self._max_multis > 0:
             multis = multis[-self._max_multis:]
         self._date_to_multis[date_label] = multis

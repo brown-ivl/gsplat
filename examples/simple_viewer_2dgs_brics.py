@@ -284,7 +284,14 @@ def main(local_rank: int, world_rank, world_size: int, args):
         if chosen_date is None:
             chosen_date = date_dirs[-1]
         # Collect multisequences with gsplat_2dgs
-        multis = [m for m in sorted(chosen_date.iterdir()) if m.is_dir() and m.name.startswith('multisequence') and (m / 'gsplat_2dgs').exists()]
+        # Collect multisequences preserving exact names; natural sort by trailing digits
+        candidates = [m for m in chosen_date.iterdir() if m.is_dir() and m.name.startswith('multisequence') and (m / 'gsplat_2dgs').exists()]
+        import re
+        def _key(p: Path):
+            n = p.name
+            m = re.search(r"(\d+)$", n)
+            return (int(m.group(1)) if m else -1, n)
+        multis = sorted(candidates, key=_key)
         if not multis:
             return None
         chosen_multi = None
@@ -365,7 +372,7 @@ if __name__ == "__main__":
         "--default_multiseq",
         type=str,
         default=None,
-        help="Optional default multisequence name to preselect (e.g., multisequence3).",
+    help="Optional default multisequence name to preselect (e.g., multisequence000003).",
     )
     parser.add_argument(
         "--port", type=int, default=8080, help="port for the viewer server"
