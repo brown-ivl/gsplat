@@ -13,12 +13,13 @@ PathLike = Union[str, Path]
 
 class GsplatViewerBrics(_BaseGsplatViewer):
     """
-    Gsplat 2DGS Viewer with selectable output directories.
+    Gsplat 2DGS Viewer with selectable directories.
 
     This subclass adds a small GUI section that lets users switch the
-    viewer's output directory at runtime among a pre-approved list supplied
-    when constructing the viewer. The selection controls where screenshots,
-    recordings, and other artifacts are written by the base viewer.
+    viewer's directory at runtime among a pre-approved list supplied when
+    constructing the viewer. The selection controls where inputs (e.g.,
+    ckpts) are read from and where screenshots/exports are saved by the
+    base viewer.
 
     Usage:
         server = viser.ViserServer(port=8080)
@@ -41,11 +42,8 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         output_dir: Path,
         mode: Literal["rendering", "training"] = "rendering",
         selectable_output_dirs: Iterable[PathLike] | None = None,
-        section_label: str = "Output",
+        section_label: str = "Input",
     ) -> None:
-        # Initialize the base viewer first
-        super().__init__(server, render_fn, output_dir, mode)
-
         # Normalize and prepare selectable directories
         choices: List[Path] = []
         if selectable_output_dirs is not None:
@@ -69,34 +67,33 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             # Ensure the initial choice is the first
             choices = [initial_dir] + [c for c in choices if c != initial_dir]
 
-        self._output_dir_choices: List[Path] = choices
-        # Map a short, unique label to each path for a clean dropdown UI
+        # Store choices and label map early so our helper can use them
+        self._output_dir_choices = list(choices)
         self._label_to_path: Dict[str, Path] = {}
         used_labels: set[str] = set()
         for idx, p in enumerate(self._output_dir_choices):
             base = p.name or str(p)
             label = base
-            # Disambiguate duplicate basenames
             if label in used_labels:
                 label = f"{base} ({idx})"
             used_labels.add(label)
             self._label_to_path[label] = p
 
-        # Build a small GUI to switch output directory
-        self._output_folder = self.server.gui.add_folder(section_label)
-        with self._output_folder:
-            # Show current directory as a disabled text field
-            cur_path_text = self.server.gui.add_text(
-                "Current Path",
-                initial_value=str(self.output_dir),
+        # Build the small GUI to switch directory BEFORE initializing base UI,
+        # so it appears at the top of the panel.
+        input_folder = server.gui.add_folder(section_label)
+        with input_folder:
+            cur_path_text = server.gui.add_text(
+                "Current Directory",
+                initial_value=str(initial_dir),
                 disabled=True,
-                hint="Where viewer saves screenshots/exports.",
+                hint="Dir used by viewer. Loads ckpt from <dir>/ckpts/ckpt_6999.pt.",
             )
-            dropdown = self.server.gui.add_dropdown(
+            dropdown = server.gui.add_dropdown(
                 "Select Directory",
                 tuple(self._label_to_path.keys()),
-                initial_value=self._label_for_path(self.output_dir),
-                hint="Choose where to save outputs.",
+                initial_value=self._label_for_path(initial_dir),
+                hint="Choose where to load inputs/save outputs.",
             )
 
             @dropdown.on_update
@@ -105,22 +102,19 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 new_dir = self._label_to_path.get(label)
                 if new_dir is None:
                     return
-                # Update both our attribute and base viewer's attribute
-                # Assumes base viewer stores output directory on self.output_dir
-                # Create if it does not exist
                 try:
                     Path(new_dir).mkdir(parents=True, exist_ok=True)
                 except Exception:
-                    # Ignore creation failures; base viewer may handle lazily
                     pass
                 self.output_dir = Path(new_dir)
                 cur_path_text.value = str(self.output_dir)
 
+        # Now initialize the base viewer so our Input section stays on top
+        super().__init__(server, render_fn, output_dir, mode)
+
         # Keep a reference for potential future updates
-        self._output_dir_handles = {
-            "dropdown": dropdown,
-            "cur_path_text": cur_path_text,
-        }
+        self._input_folder = input_folder
+        self._output_dir_handles = {"dropdown": dropdown, "cur_path_text": cur_path_text}
 
     # Utility to find a label given a path value
     def _label_for_path(self, p: PathLike) -> str:
