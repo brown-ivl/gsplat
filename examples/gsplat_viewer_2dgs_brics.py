@@ -26,14 +26,12 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         base_dir: PathLike,
         section_label: str = "Input",
         on_select_dir: Callable[[Path], None] | None = None,
-        on_select_ckpt: Callable[[Path], None] | None = None,
         default_date: str | None = None,
         default_multiseq: str | None = None,
         max_dates: int | None = None,
         max_multis: int | None = None,
     ) -> None:
         self._on_select_dir = on_select_dir
-        self._on_select_ckpt = on_select_ckpt
         self._base_dir = Path(base_dir).expanduser()
 
         # Caches for fast scanning
@@ -107,12 +105,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 disabled=True,
                 hint="Highest ckpt_<number>.pt loaded from the directory.",
             )
-            ckpt_dropdown = server.gui.add_dropdown(
-                "Checkpoint file",
-                tuple(["<none>"]),
-                initial_value="<none>",
-                hint="Select a checkpoint (ckpts/ckpt_*.pt) to load.",
-            )
 
             @date_dropdown.on_update
             def _(_evt) -> None:  # noqa: ANN001
@@ -137,21 +129,11 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 if new_dir is not None:
                     self.output_dir = new_dir
                     cur_path_text.value = str(self.output_dir)
-                    # Update checkpoint list for new dir and trigger load of selected ckpt
-                    self._update_ckpt_dropdown(self.output_dir)
-                    # Callbacks
                     if self._on_select_dir is not None:
                         try:
                             self._on_select_dir(self.output_dir)
                         except Exception:
                             pass
-                    sel_ckpt = getattr(ckpt_dropdown, "value", None)
-                    if sel_ckpt and sel_ckpt != "<none>":
-                        if self._on_select_ckpt is not None:
-                            try:
-                                self._on_select_ckpt(Path(sel_ckpt))
-                            except Exception:
-                                pass
 
             @multi_dropdown.on_update
             def _(_evt) -> None:  # noqa: ANN001
@@ -161,31 +143,11 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 if new_dir is not None:
                     self.output_dir = new_dir
                     cur_path_text.value = str(self.output_dir)
-                    # Update checkpoint list for new dir and trigger load of selected ckpt
-                    self._update_ckpt_dropdown(self.output_dir)
                     if self._on_select_dir is not None:
                         try:
                             self._on_select_dir(self.output_dir)
                         except Exception:
                             pass
-                    sel_ckpt = getattr(ckpt_dropdown, "value", None)
-                    if sel_ckpt and sel_ckpt != "<none>":
-                        if self._on_select_ckpt is not None:
-                            try:
-                                self._on_select_ckpt(Path(sel_ckpt))
-                            except Exception:
-                                pass
-
-            @ckpt_dropdown.on_update
-            def _(_evt) -> None:  # noqa: ANN001
-                val = getattr(ckpt_dropdown, "value", None)
-                if not val or val == "<none>":
-                    return
-                if self._on_select_ckpt is not None:
-                    try:
-                        self._on_select_ckpt(Path(val))
-                    except Exception:
-                        pass
 
         # Initialize base viewer
         super().__init__(server, render_fn, cur_gsplat_dir, mode)
@@ -199,14 +161,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             "multi_dropdown": multi_dropdown,
             "cur_path_text": cur_path_text,
             "ckpt_number": ckpt_number,
-            "ckpt_dropdown": ckpt_dropdown,
         }
-
-        # Populate checkpoint dropdown initially for the resolved directory
-        try:
-            self._update_ckpt_dropdown(cur_gsplat_dir)
-        except Exception:
-            pass
 
     def set_checkpoint_number(self, number: int | None) -> None:
         try:
@@ -236,61 +191,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                     w.disabled = bool(loading)  # type: ignore[attr-defined]
                 except Exception:
                     pass
-        except Exception:
-            pass
-
-    def _scan_ckpt_files(self, gsplat_dir: Path | None) -> list[tuple[str, int]]:
-        """Return list of (fullpath_str, number) for ckpt_*.pt in gsplat_dir/ckpts, sorted by number asc."""
-        out: list[tuple[str, int]] = []
-        if gsplat_dir is None:
-            return out
-        ck = Path(gsplat_dir) / "ckpts"
-        if not ck.exists() or not ck.is_dir():
-            return out
-        import re
-        for p in ck.glob("ckpt_*.pt"):
-            m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", p.name)
-            if not m:
-                continue
-            out.append((str(p.resolve()), int(m.group(1))))
-        out.sort(key=lambda t: t[1])
-        return out
-
-    def _update_ckpt_dropdown(self, gsplat_dir: Path | None) -> None:
-        dd = self._output_dir_handles.get("ckpt_dropdown")
-        if dd is None:
-            return
-        lst = self._scan_ckpt_files(gsplat_dir)
-        if not lst:
-            try:
-                dd.choices = tuple(["<none>"])  # type: ignore[attr-defined]
-                dd.value = "<none>"  # type: ignore[attr-defined]
-            except Exception:
-                try:
-                    dd.options = tuple(["<none>"])  # type: ignore[attr-defined]
-                    dd.value = "<none>"  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-            return
-        # Display as full path string to avoid ambiguity; store directly as choices
-        choices = tuple([p for p, _n in lst])
-        try:
-            dd.choices = choices  # type: ignore[attr-defined]
-        except Exception:
-            try:
-                dd.options = choices  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        # Preselect the last (highest number)
-        last = choices[-1]
-        try:
-            dd.value = last  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        # Update the numeric widget with selected number
-        try:
-            nums = [n for _p, n in lst]
-            self.set_checkpoint_number(nums[-1] if nums else 0)
         except Exception:
             pass
 
@@ -416,17 +316,8 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 cur_path_text.value = str(self.output_dir)
             except Exception:
                 pass
-            # Update ckpt dropdown for the new dir and trigger callback
-            self._update_ckpt_dropdown(self.output_dir)
             if self._on_select_dir is not None:
                 try:
                     self._on_select_dir(self.output_dir)
-                except Exception:
-                    pass
-            dd_ck = self._output_dir_handles.get("ckpt_dropdown")
-            sel_ckpt = getattr(dd_ck, "value", None)
-            if sel_ckpt and sel_ckpt != "<none>" and self._on_select_ckpt is not None:
-                try:
-                    self._on_select_ckpt(Path(sel_ckpt))
                 except Exception:
                     pass

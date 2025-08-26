@@ -56,18 +56,9 @@ def main(local_rank: int, world_rank, world_size: int, args):
                 best_path = p
         return best_path, best_num
 
-    def _parse_ckpt_num(ckpt_path: Path) -> int:
-        import re
-        m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", ckpt_path.name)
-        return int(m.group(1)) if m else -1
-
-    def _do_load(dir_path: Path, token_id: int, specific_ckpt: Path | None = None):
-        # Resolve and check ckpt (specific or best)
-        if specific_ckpt is not None:
-            best_path = Path(specific_ckpt)
-            best_num = _parse_ckpt_num(best_path)
-        else:
-            best_path, best_num = _find_best_ckpt(dir_path)
+    def _do_load(dir_path: Path, token_id: int):
+        # Resolve and check best ckpt
+        best_path, best_num = _find_best_ckpt(dir_path)
         if best_path is None:
             print(f"[viewer] No matching ckpt_*.pt found under: {dir_path}/ckpts")
             if viewer is not None:
@@ -149,17 +140,14 @@ def main(local_rank: int, world_rank, world_size: int, args):
             except Exception:
                 pass
 
-    def request_load(dir_path: Path, ckpt_path: Path | None = None):
+    def request_load(dir_path: Path):
         # Announce loading and kick a background thread; cancel older loads via token
         if viewer is not None:
-            if ckpt_path is None:
-                viewer.set_loading(True, f"Loading from {dir_path}...")
-            else:
-                viewer.set_loading(True, f"Loading {ckpt_path.name}...")
+            viewer.set_loading(True, f"Loading from {dir_path}...")
         with load_lock:
             load_token["id"] += 1
             token_id = load_token["id"]
-        th = threading.Thread(target=_do_load, args=(dir_path, token_id, ckpt_path), daemon=True)
+        th = threading.Thread(target=_do_load, args=(dir_path, token_id), daemon=True)
         th.start()
 
     # register and open viewer
@@ -291,13 +279,6 @@ def main(local_rank: int, world_rank, world_size: int, args):
     def _on_select_dir(p: Path):
         request_load(p)
 
-    def _on_select_ckpt(ckpt_path: Path):
-        # Load the specific checkpoint for the current dir
-        cur_dir = getattr(viewer, "output_dir", None)
-        if cur_dir is None:
-            return
-        request_load(Path(cur_dir), ckpt_path)
-
     viewer = GsplatViewerBrics(
         server=server,
         render_fn=viewer_render_fn,
@@ -308,8 +289,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
     default_multiseq=args.default_multiseq,
     max_dates=args.max_dates,
     max_multis=args.max_multis,
-    on_select_dir=_on_select_dir,
-    on_select_ckpt=_on_select_ckpt,
+        on_select_dir=_on_select_dir,
     )
     # Periodically refresh base_dir every 10 minutes in the background
     def _periodic_refresh():
