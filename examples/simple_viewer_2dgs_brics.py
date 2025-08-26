@@ -42,23 +42,28 @@ def main(local_rank: int, world_rank, world_size: int, args):
     def _find_best_ckpt(dir_path: Path):
         import re
         ckpts_dir = Path(dir_path) / "ckpts"
-        if not ckpts_dir.exists():
-            return None, -1
+        roots = []
+        if ckpts_dir.exists():
+            roots.append(ckpts_dir)
+        # also consider gsplat dir root
+        roots.append(Path(dir_path))
         best_num = -1
         best_path = None
-        for p in ckpts_dir.glob("ckpt_*.pt"):
-            m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", p.name)
-            if not m:
-                continue
-            n = int(m.group(1))
-            if n > best_num:
-                best_num = n
-                best_path = p
+        for root in roots:
+            for ext in ("pt", "pth"):
+                for p in root.glob(f"ckpt_*.{ext}"):
+                    m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.(?:pt|pth)$", p.name)
+                    if not m:
+                        continue
+                    n = int(m.group(1))
+                    if n > best_num:
+                        best_num = n
+                        best_path = p
         return best_path, best_num
 
     def _parse_ckpt_num(ckpt_path: Path) -> int:
         import re
-        m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", ckpt_path.name)
+        m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.(?:pt|pth)$", ckpt_path.name)
         return int(m.group(1)) if m else -1
 
     def _do_load(dir_path: Path, token_id: int, specific_ckpt: Path | None = None):

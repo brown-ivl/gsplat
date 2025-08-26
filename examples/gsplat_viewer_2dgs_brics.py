@@ -111,7 +111,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 "Checkpoint",
                 tuple(["<none>"]),
                 initial_value="<none>",
-                hint="Select a checkpoint (ckpts/ckpt_*.pt) to load.",
+                hint="Select a checkpoint (ckpts/ckpt_*.pt or .pth) to load.",
             )
 
             @date_dropdown.on_update
@@ -245,15 +245,24 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         out: List[Tuple[str, int]] = []
         if gsplat_dir is None:
             return out
+        roots: List[Path] = []
         ck = Path(gsplat_dir) / "ckpts"
-        if not ck.exists() or not ck.is_dir():
-            return out
+        if ck.exists() and ck.is_dir():
+            roots.append(ck)
+        roots.append(Path(gsplat_dir))  # fallback: sometimes ckpts are placed at root
         import re
-        for p in ck.glob("ckpt_*.pt"):
-            m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", p.name)
-            if not m:
-                continue
-            out.append((str(p.resolve()), int(m.group(1))))
+        seen: set[str] = set()
+        for root in roots:
+            for ext in ("pt", "pth"):
+                for p in root.glob(f"ckpt_*.{ext}"):
+                    m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.(?:pt|pth)$", p.name)
+                    if not m:
+                        continue
+                    full = str(p.resolve())
+                    if full in seen:
+                        continue
+                    seen.add(full)
+                    out.append((full, int(m.group(1))))
         out.sort(key=lambda t: t[1])
         return out
 
