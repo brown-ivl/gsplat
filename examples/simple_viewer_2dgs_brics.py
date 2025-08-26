@@ -230,11 +230,16 @@ def main(local_rank: int, world_rank, world_size: int, args):
             depth_norm = torch.clip(depth_norm, 0, 1)
             if render_tab_state.inverse:
                 depth_norm = 1 - depth_norm
-            # Ensure shape [H,W,1] for colormap; handle [1,H,W] or [H,W]
+            # Ensure shape [H,W,1] for colormap; handle [1,H,W,1], [1,H,W], [H,W]
+            if depth_norm.dim() == 4 and depth_norm.shape[0] == 1:
+                depth_norm = depth_norm[0]
             if depth_norm.dim() == 3 and depth_norm.shape[0] == 1:
                 depth_norm = depth_norm[0]
             if depth_norm.dim() == 2:
                 depth_norm = depth_norm.unsqueeze(-1)
+            elif depth_norm.dim() == 3 and depth_norm.shape[-1] != 1:
+                # Fallback: collapse channels to single channel
+                depth_norm = depth_norm.mean(dim=-1, keepdim=True)
             renders = apply_float_colormap(depth_norm, render_tab_state.colormap).cpu().numpy()
         elif render_tab_state.render_mode == "normal":
             # Expect HxWx3 image; select batch 0 and clamp to [0,1]
