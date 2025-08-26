@@ -21,8 +21,6 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -120,7 +118,7 @@ def main() -> int:
             if ckpts:
                 print(f"[skip] {mdir} (existing {len(ckpts)} ckpt(s))")
                 continue
-        cmd = build_cmd(python_exe, trainer_script, stage2, result_dir, args.__dict__["data-factor"], extra)
+        cmd = build_cmd(python_exe, trainer_script, stage2, result_dir, args.data_factor, extra)
         print("[run]", " ".join(cmd))
         if args.dry_run:
             continue
