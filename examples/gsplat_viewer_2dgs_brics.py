@@ -50,13 +50,13 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         date_labels = self._scan_date_labels()
         if not date_labels:
             date_labels = ["unknown"]
-            self._date_to_multis["unknown"] = ["multisequence0"]
+            self._date_to_multis["unknown"] = ["multisequence000001"]
 
         # Choose defaults
         cur_date = default_date if (default_date in date_labels) else date_labels[-1]
         multis_for_date = self._scan_multis_for_date(cur_date)
         if not multis_for_date:
-            multis_for_date = ["multisequence0"]
+            multis_for_date = ["multisequence000001"]
         cur_multi = (
             default_multiseq if (default_multiseq in multis_for_date) else multis_for_date[-1]
         )
@@ -97,18 +97,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 initial_value=cur_multi,
                 hint="Select multisequence under the chosen date.",
             )
-            cur_path_text = server.gui.add_text(
-                "Current Directory",
-                initial_value=str(cur_gsplat_dir),
-                disabled=True,
-                hint="Selected <date>/<multisequence>/gsplat_2dgs path.",
-            )
-            ckpt_number = server.gui.add_number(
-                "Checkpoint Number",
-                initial_value=0,
-                disabled=True,
-                hint="Highest ckpt_<number>.pt loaded from the directory.",
-            )
             ckpt_dropdown = server.gui.add_dropdown(
                 "Checkpoint",
                 tuple(["<none>"]),
@@ -120,35 +108,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 ckpt_dropdown.disabled = False  # type: ignore[attr-defined]
             except Exception:
                 pass
-            ckpt_dir_text = server.gui.add_text(
-                "Checkpoint Dir",
-                initial_value=str((cur_gsplat_dir / "ckpts").resolve() if cur_gsplat_dir else ""),
-                disabled=True,
-                hint="Directory being scanned for checkpoints.",
-            )
-            ckpt_count_text = server.gui.add_text(
-                "Checkpoint Count",
-                initial_value="0",
-                disabled=True,
-                hint="Number of checkpoints found in the directory.",
-            )
-            ckpt_list_text = server.gui.add_text(
-                "Checkpoint Files",
-                initial_value="",
-                disabled=True,
-                hint="List of detected checkpoint files (basenames).",
-            )
-            refresh_ckpts_btn = server.gui.add_button(
-                "Refresh ckpts",
-                hint="Rescan the current directory for checkpoint files.",
-            )
-
-            @refresh_ckpts_btn.on_click
-            def _(_evt) -> None:  # noqa: ANN001
-                try:
-                    self._update_ckpt_dropdown(self.output_dir)
-                except Exception:
-                    pass
 
             @date_dropdown.on_update
             def _(_evt) -> None:  # noqa: ANN001
@@ -172,7 +131,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 new_dir = self._resolve_gsplat_dir(new_date, sel_multi)
                 if new_dir is not None:
                     self.output_dir = new_dir
-                    cur_path_text.value = str(self.output_dir)
                     # Update checkpoints for new dir
                     self._update_ckpt_dropdown(self.output_dir)
                     # Callbacks
@@ -196,7 +154,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 new_dir = self._resolve_gsplat_dir(new_date, new_multi)
                 if new_dir is not None:
                     self.output_dir = new_dir
-                    cur_path_text.value = str(self.output_dir)
                     # Update checkpoints for new dir
                     self._update_ckpt_dropdown(self.output_dir)
                     if self._on_select_dir is not None:
@@ -234,13 +191,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             "base_dir_text": base_dir_text,
             "date_dropdown": date_dropdown,
             "multi_dropdown": multi_dropdown,
-            "cur_path_text": cur_path_text,
-            "ckpt_number": ckpt_number,
             "ckpt_dropdown": ckpt_dropdown,
-            "ckpt_dir_text": ckpt_dir_text,
-            "ckpt_count_text": ckpt_count_text,
-            "ckpt_list_text": ckpt_list_text,
-            "refresh_ckpts_btn": refresh_ckpts_btn,
         }
 
         # Populate checkpoint list initially
