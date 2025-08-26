@@ -45,6 +45,8 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         self._max_multis = max_multis
         # For checkpoint dropdown label->path mapping
         self._ckpt_label_to_path = {}
+        self._last_ckpt_labels = []
+        self._last_ckpt_selected_label = None
 
         # Initial scan
         date_labels = self._scan_date_labels()
@@ -310,35 +312,8 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             dd.disabled = False  # type: ignore[attr-defined]
         except Exception:
             pass
-        try:
-            print(f"[viewer] scanning ckpts under: {gsplat_dir}")
-        except Exception:
-            pass
+        # Discover checkpoints
         items = self._scan_ckpt_files(gsplat_dir)
-        try:
-            print(f"[viewer] found {len(items)} ckpt(s)")
-        except Exception:
-            print("[viewer] _scan_ckpt_files failed to return any")
-        # Update UI debug fields
-        try:
-            dtext = self._output_dir_handles.get("ckpt_dir_text")
-            ctext = self._output_dir_handles.get("ckpt_count_text")
-            ltext = self._output_dir_handles.get("ckpt_list_text")
-            if dtext is not None:
-                # Prefer gsplat_dir/ckpts if exists
-                p = (Path(gsplat_dir) / "ckpts") if gsplat_dir is not None else None
-                if p is not None:
-                    dtext.value = str(p.resolve())
-            if ctext is not None:
-                ctext.value = str(len(items))
-            if ltext is not None:
-                try:
-                    import os
-                    ltext.value = ", ".join([os.path.basename(p) for p, _n in items])
-                except Exception:
-                    ltext.value = ""
-        except Exception:
-            pass
         if not items:
             try:
                 dd.choices = tuple(["<none>"])  # type: ignore[attr-defined]
@@ -348,12 +323,15 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                     dd.options = tuple(["<none>"])  # type: ignore[attr-defined]
                     dd.value = "<none>"  # type: ignore[attr-defined]
                 except Exception:
-                    print("[viewer] failed to set ckpt dropdown to <none>")
+                    pass
+            self._last_ckpt_labels = []
+            self._last_ckpt_selected_label = None
             return
         # Map labels (basenames) to full paths for stable, readable dropdown
         import os
         labels = [os.path.basename(p) for p, _n in items]
         self._ckpt_label_to_path = {lab: p for lab, (p, _n) in zip(labels, items)}
+        self._last_ckpt_labels = labels
         label_choices = tuple(labels)
         try:
             dd.choices = label_choices  # type: ignore[attr-defined]
@@ -361,23 +339,41 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             try:
                 dd.options = label_choices  # type: ignore[attr-defined]
             except Exception:
-                print("[viewer] failed to set ckpt dropdown options")
+                pass
         last_label = labels[-1]
         try:
             dd.value = last_label  # type: ignore[attr-defined]
         except Exception:
-            print("[viewer] failed to set ckpt dropdown value")
-        # Re-ensure enabled after assigning value
+            pass
+        self._last_ckpt_selected_label = last_label
+        # Ensure enabled after assigning value
         try:
             dd.disabled = False  # type: ignore[attr-defined]
         except Exception:
-            print("[viewer] failed to enable ckpt dropdown")
+            pass
         # Reflect number in numeric display
         try:
             nums = [n for _p, n in items]
             self.set_checkpoint_number(nums[-1] if nums else 0)
         except Exception:
-            print("[viewer] failed to set checkpoint number")
+            pass
+        # Proactively trigger load for the selected/latest checkpoint
+        try:
+            if self._on_select_ckpt is not None and last_label in self._ckpt_label_to_path:
+                self._on_select_ckpt(Path(self._ckpt_label_to_path[last_label]))
+        except Exception:
+            pass
+
+    def _auto_select_ckpt(self) -> None:
+        try:
+            if not self._last_ckpt_labels:
+                return
+            label = self._last_ckpt_selected_label or self._last_ckpt_labels[-1]
+            path = self._ckpt_label_to_path.get(label, None)
+            if path and self._on_select_ckpt is not None:
+                self._on_select_ckpt(Path(path))
+        except Exception:
+            pass
 
     def _resolve_gsplat_dir(self, date_label: str | None, multi_label: str | None) -> Path | None:
         if date_label is None or multi_label is None:
