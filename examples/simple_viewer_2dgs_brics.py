@@ -14,7 +14,7 @@ from gsplat.rendering import rasterization_2dgs
 from gsplat_viewer_2dgs_brics import GsplatViewerBrics
 from nerfview import CameraState, RenderTabState, apply_float_colormap
 
-REFRESH_INTERVAL = 60
+REFRESH_INTERVAL = 600
 
 def main(local_rank: int, world_rank, world_size: int, args):
     torch.manual_seed(42)
