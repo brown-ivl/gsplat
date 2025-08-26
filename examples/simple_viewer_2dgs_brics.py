@@ -2,7 +2,6 @@ import argparse
 import math
 import time
 from pathlib import Path
-from typing import Tuple
 
 import torch
 import torch.nn.functional as F
@@ -18,8 +17,13 @@ def main(local_rank: int, world_rank, world_size: int, args):
     torch.manual_seed(42)
     device = torch.device("cuda", local_rank)
 
+    # Build checkpoint paths from each provided output_dir: <output_dir>/ckpts/ckpt_6999.pt
+    ckpt_paths = [Path(d) / "ckpts" / "ckpt_6999.pt" for d in args.output_dir]
+
     means, quats, scales, opacities, sh0, shN = [], [], [], [], [], []
-    for ckpt_path in args.ckpt:
+    for ckpt_path in ckpt_paths:
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
         ckpt = torch.load(ckpt_path, map_location=device)["splats"]
         means.append(ckpt["means"])
         quats.append(F.normalize(ckpt["quats"], p=2, dim=-1))
@@ -136,9 +140,6 @@ if __name__ == "__main__":
         nargs="+",
         default=["results/"],
         help="One or more directories where viewer can write outputs; selectable at runtime.",
-    )
-    parser.add_argument(
-        "--ckpt", type=str, nargs="+", required=True, help="path(s) to the .pt file(s)"
     )
     parser.add_argument(
         "--port", type=int, default=8080, help="port for the viewer server"
