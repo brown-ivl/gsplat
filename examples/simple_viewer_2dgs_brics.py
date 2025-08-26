@@ -2,6 +2,7 @@ import argparse
 import math
 import time
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import torch
@@ -29,28 +30,20 @@ def main(local_rank: int, world_rank, world_size: int, args):
         "colors": None,
         "sh_degree": None,
         "ckpt_num": None,
+        "dir": None,
     }
 
-    def load_from_dir(dir_path: Path) -> bool:
-        # Inform UI we’re loading
-        try:
-            if viewer is not None:
-                viewer.set_loading(True, f"Loading from {dir_path}...")
-        except Exception:
-            pass
+    # Lightweight LRU cache of loaded scenes to avoid reloading when toggling
+    CACHE_SIZE = 2
+    cache = OrderedDict()  # key: str(path), value: dict like data
+    load_lock = threading.Lock()
+    load_token = {"id": 0}  # increments for each new request to cancel stale loads
 
+    def _find_best_ckpt(dir_path: Path):
+        import re
         ckpts_dir = Path(dir_path) / "ckpts"
         if not ckpts_dir.exists():
-            print(f"[viewer] ckpts dir not found: {ckpts_dir}")
-            try:
-                if viewer is not None:
-                    viewer.set_loading(False, f"No ckpts: {ckpts_dir}")
-            except Exception:
-                pass
-            return False
-        # Find highest ckpt_<number>.pt (also accept ckpt_<number>_rank*.pt)
-        import re
-
+            return None, -1
         best_num = -1
         best_path = None
         for p in ckpts_dir.glob("ckpt_*.pt"):
@@ -61,38 +54,101 @@ def main(local_rank: int, world_rank, world_size: int, args):
             if n > best_num:
                 best_num = n
                 best_path = p
+        return best_path, best_num
+
+    def _do_load(dir_path: Path, token_id: int):
+        # Resolve and check best ckpt
+        best_path, best_num = _find_best_ckpt(dir_path)
         if best_path is None:
-            print(f"[viewer] No matching ckpt_*.pt found under: {ckpts_dir}")
-            try:
+            print(f"[viewer] No matching ckpt_*.pt found under: {dir_path}/ckpts")
+            if viewer is not None:
+                viewer.set_loading(False, f"No ckpt_*.pt in {dir_path}/ckpts")
+            return
+
+        # Short-circuit if already up-to-date for this dir
+        if data.get("dir") == str(dir_path) and data.get("ckpt_num") == best_num:
+            if viewer is not None:
+                viewer.set_loading(False, f"Already loaded ckpt_{best_num}.pt")
+                try:
+                    viewer.set_checkpoint_number(best_num)
+                except Exception:
+                    pass
+            return
+
+        key = str(Path(dir_path).resolve())
+        # Try cache
+        if key in cache:
+            cached = cache[key]
+            if cached.get("ckpt_num") == best_num:
+                with load_lock:
+                    if token_id != load_token["id"]:
+                        return
+                    data.update(cached)
                 if viewer is not None:
-                    viewer.set_loading(False, f"No ckpt_*.pt in {ckpts_dir}")
+                    viewer.set_loading(False, f"Cached ckpt_{best_num}.pt")
+                    try:
+                        viewer.set_checkpoint_number(best_num)
+                        viewer.rerender(None)
+                    except Exception:
+                        pass
+                return
+
+        # Load on CPU then move to GPU non-blocking
+        try:
+            ckpt_cpu = torch.load(best_path, map_location="cpu")["splats"]
+            # Move and process on GPU
+            means = ckpt_cpu["means"].to(device, non_blocking=True)
+            quats = F.normalize(ckpt_cpu["quats"].to(device, non_blocking=True), p=2, dim=-1)
+            scales = torch.exp(ckpt_cpu["scales"].to(device, non_blocking=True))
+            opacities = torch.sigmoid(ckpt_cpu["opacities"].to(device, non_blocking=True))
+            sh0 = ckpt_cpu["sh0"].to(device, non_blocking=True)
+            shN = ckpt_cpu["shN"].to(device, non_blocking=True)
+            colors = torch.cat([sh0, shN], dim=-2)
+            sh_degree = int(math.sqrt(colors.shape[-2]) - 1)
+        except Exception as e:
+            print(f"[viewer] Load failed: {e}")
+            if viewer is not None:
+                viewer.set_loading(False, f"Error: {e}")
+            return
+
+        with load_lock:
+            if token_id != load_token["id"]:
+                return
+            data.update(
+                {
+                    "means": means,
+                    "quats": quats,
+                    "scales": scales,
+                    "opacities": opacities,
+                    "colors": colors,
+                    "sh_degree": sh_degree,
+                    "ckpt_num": best_num,
+                    "dir": key,
+                }
+            )
+            cache[key] = {k: data[k] for k in ("means","quats","scales","opacities","colors","sh_degree","ckpt_num","dir")}
+            # Enforce LRU size
+            while len(cache) > CACHE_SIZE:
+                cache.popitem(last=False)
+
+        print("[viewer] Loaded:", best_path)
+        if viewer is not None:
+            viewer.set_loading(False, f"Loaded {best_path.name}")
+            try:
+                viewer.set_checkpoint_number(best_num)
+                viewer.rerender(None)
             except Exception:
                 pass
-            return False
-        ckpt = torch.load(best_path, map_location=device)["splats"]
-        means = ckpt["means"]
-        quats = F.normalize(ckpt["quats"], p=2, dim=-1)
-        scales = torch.exp(ckpt["scales"])
-        opacities = torch.sigmoid(ckpt["opacities"])
-        sh0 = ckpt["sh0"]
-        shN = ckpt["shN"]
-        colors = torch.cat([sh0, shN], dim=-2)
-        sh_degree = int(math.sqrt(colors.shape[-2]) - 1)
 
-        data["means"] = means
-        data["quats"] = quats
-        data["scales"] = scales
-        data["opacities"] = opacities
-        data["colors"] = colors
-        data["sh_degree"] = sh_degree
-        data["ckpt_num"] = best_num
-        print("[viewer] Loaded:", best_path)
-        try:
-            if viewer is not None:
-                viewer.set_loading(False, f"Loaded {best_path.name}")
-        except Exception:
-            pass
-        return True
+    def request_load(dir_path: Path):
+        # Announce loading and kick a background thread; cancel older loads via token
+        if viewer is not None:
+            viewer.set_loading(True, f"Loading from {dir_path}...")
+        with load_lock:
+            load_token["id"] += 1
+            token_id = load_token["id"]
+        th = threading.Thread(target=_do_load, args=(dir_path, token_id), daemon=True)
+        th.start()
 
     # register and open viewer
     @torch.no_grad()
@@ -215,25 +271,13 @@ def main(local_rank: int, world_rank, world_size: int, args):
         return (chosen_multi / 'gsplat_2dgs')
 
     initial_dir = _resolve_initial_dir(Path(args.base_dir), args.default_date, args.default_multiseq)
-    if initial_dir is not None:
-        load_from_dir(initial_dir)
 
     server = viser.ViserServer(port=args.port, verbose=False)
 
     viewer = None  # will be set after construction
 
     def _on_select_dir(p: Path):
-        if load_from_dir(p):
-            if viewer is not None and hasattr(viewer, "rerender"):
-                try:
-                    # Update the checkpoint number in the UI
-                    try:
-                        viewer.set_checkpoint_number(data.get("ckpt_num"))
-                    except Exception:
-                        pass
-                    viewer.rerender(None)
-                except Exception:
-                    pass
+        request_load(p)
 
     viewer = GsplatViewerBrics(
         server=server,
@@ -242,7 +286,9 @@ def main(local_rank: int, world_rank, world_size: int, args):
         mode="rendering",
         base_dir=Path(args.base_dir),
         default_date=args.default_date,
-        default_multiseq=args.default_multiseq,
+    default_multiseq=args.default_multiseq,
+    max_dates=args.max_dates,
+    max_multis=args.max_multis,
         on_select_dir=_on_select_dir,
     )
     # Periodically refresh base_dir every 10 minutes in the background
@@ -259,16 +305,9 @@ def main(local_rank: int, world_rank, world_size: int, args):
 
     t = threading.Thread(target=_periodic_refresh, daemon=True)
     t.start()
-    # If we loaded initially, reflect checkpoint number and render once
-    if data["means"] is not None:
-        try:
-            viewer.set_checkpoint_number(data.get("ckpt_num"))
-        except Exception:
-            pass
-        try:
-            viewer.rerender(None)
-        except Exception:
-            pass
+    # Kick initial load asynchronously
+    if initial_dir is not None:
+        request_load(initial_dir)
     print("Viewer running... Ctrl+C to exit.")
     time.sleep(100000)
 
@@ -295,6 +334,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--port", type=int, default=8080, help="port for the viewer server"
+    )
+    parser.add_argument(
+        "--max_dates",
+        type=int,
+        default=None,
+        help="Optional cap on number of date folders shown (keep the latest N).",
+    )
+    parser.add_argument(
+        "--max_multis",
+        type=int,
+        default=None,
+        help="Optional cap on number of multisequences shown per date (keep latest N).",
     )
     args = parser.parse_args()
 
