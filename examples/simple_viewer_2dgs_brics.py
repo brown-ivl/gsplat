@@ -14,6 +14,7 @@ from gsplat.rendering import rasterization_2dgs
 from gsplat_viewer_2dgs_brics import GsplatViewerBrics
 from nerfview import CameraState, RenderTabState, apply_float_colormap
 
+REFRESH_INTERVAL = 10
 
 def main(local_rank: int, world_rank, world_size: int, args):
     torch.manual_seed(42)
@@ -248,7 +249,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
     def _periodic_refresh():
         while True:
             try:
-                time.sleep(600)
+                time.sleep(REFRESH_INTERVAL)
                 if hasattr(viewer, "refresh_base_dir"):
                     viewer.refresh_base_dir()
                     print("[viewer] base_dir refreshed")
