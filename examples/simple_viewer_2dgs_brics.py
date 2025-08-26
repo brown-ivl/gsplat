@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import viser
+import numpy as np
 
 from gsplat.distributed import cli
 from gsplat.rendering import rasterization_2dgs
@@ -78,6 +79,11 @@ def main(local_rank: int, world_rank, world_size: int, args):
         else:
             width = render_tab_state.viewer_width
             height = render_tab_state.viewer_height
+        # If no data loaded yet, return a solid background to avoid crashes
+        if data["means"] is None:
+            bg = np.array(render_tab_state.backgrounds, dtype=np.float32) / 255.0
+            bg = bg.reshape(1, 1, 3)
+            return np.tile(bg, (height, width, 1))
         c2w = camera_state.c2w
         K = camera_state.get_K((width, height))
         c2w = torch.from_numpy(c2w).float().to(device)
@@ -148,6 +154,46 @@ def main(local_rank: int, world_rank, world_size: int, args):
             renders = render_colors.cpu().numpy()
         return renders
 
+    # Resolve an initial gsplat_2dgs directory from base_dir/defaults
+    def _resolve_initial_dir(base_dir: Path, default_date: str | None, default_multiseq: str | None) -> Path | None:
+        base_dir = Path(base_dir)
+        if not base_dir.exists():
+            return None
+        # Collect dates
+        dates = [d for d in sorted(base_dir.iterdir()) if d.is_dir()]
+        def _is_date_dir(p: Path) -> bool:
+            n = p.name
+            return len(n) == 10 and n[4] == '-' and n[7] == '-' and n.replace('-', '').isdigit()
+        date_dirs = [d for d in dates if _is_date_dir(d)]
+        if not date_dirs:
+            return None
+        # Choose date
+        chosen_date = None
+        if default_date is not None:
+            for d in date_dirs:
+                if d.name == default_date:
+                    chosen_date = d
+                    break
+        if chosen_date is None:
+            chosen_date = date_dirs[-1]
+        # Collect multisequences with gsplat_2dgs
+        multis = [m for m in sorted(chosen_date.iterdir()) if m.is_dir() and m.name.startswith('multisequence') and (m / 'gsplat_2dgs').exists()]
+        if not multis:
+            return None
+        chosen_multi = None
+        if default_multiseq is not None:
+            for m in multis:
+                if m.name == default_multiseq:
+                    chosen_multi = m
+                    break
+        if chosen_multi is None:
+            chosen_multi = multis[-1]
+        return (chosen_multi / 'gsplat_2dgs')
+
+    initial_dir = _resolve_initial_dir(Path(args.base_dir), args.default_date, args.default_multiseq)
+    if initial_dir is not None:
+        load_from_dir(initial_dir)
+
     server = viser.ViserServer(port=args.port, verbose=False)
 
     viewer = None  # will be set after construction
@@ -168,31 +214,23 @@ def main(local_rank: int, world_rank, world_size: int, args):
     viewer = GsplatViewerBrics(
         server=server,
         render_fn=viewer_render_fn,
-        output_dir=Path(args.base_dir),
+        output_dir=(initial_dir if initial_dir is not None else Path(args.base_dir)),
         mode="rendering",
         base_dir=Path(args.base_dir),
         default_date=args.default_date,
         default_multiseq=args.default_multiseq,
         on_select_dir=_on_select_dir,
     )
-    # Initial load for the selected directory resolved by the viewer
-    try:
-        if load_from_dir(Path(viewer.output_dir)):
-            try:
-                viewer.set_checkpoint_number(data.get("ckpt_num"))
-            except Exception:
-                pass
-            try:
-                viewer.rerender(None)
-            except Exception:
-                pass
-        else:
-            raise FileNotFoundError(
-                f"No checkpoints found under: {Path(viewer.output_dir)}/ckpts"
-            )
-    except Exception:
-        # Keep the server running; user can change selection in UI
-        pass
+    # If we loaded initially, reflect checkpoint number and render once
+    if data["means"] is not None:
+        try:
+            viewer.set_checkpoint_number(data.get("ckpt_num"))
+        except Exception:
+            pass
+        try:
+            viewer.rerender(None)
+        except Exception:
+            pass
     print("Viewer running... Ctrl+C to exit.")
     time.sleep(100000)
 
