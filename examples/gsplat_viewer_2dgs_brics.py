@@ -37,12 +37,14 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         self._base_dir = Path(base_dir).expanduser()
 
         # Caches for fast scanning
-        self._date_to_multis: Dict[str, List[str]] = {}
-        self._date_mtimes: Dict[str, int] = {}
-        self._base_mtime: int | None = None
-        self._date_labels: List[str] = []
-        self._max_dates: int | None = max_dates
-        self._max_multis: int | None = max_multis
+        self._date_to_multis = {}
+        self._date_mtimes = {}
+        self._base_mtime = None
+        self._date_labels = []
+        self._max_dates = max_dates
+        self._max_multis = max_multis
+        # For checkpoint dropdown label->path mapping
+        self._ckpt_label_to_path = {}
 
         # Initial scan
         date_labels = self._scan_date_labels()
@@ -174,10 +176,11 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                             self._on_select_dir(self.output_dir)
                         except Exception:
                             pass
-                    sel_ck = getattr(ckpt_dropdown, "value", None)
-                    if sel_ck and sel_ck != "<none>" and self._on_select_ckpt is not None:
+                    sel_label = getattr(ckpt_dropdown, "value", None)
+                    if sel_label and sel_label != "<none>" and self._on_select_ckpt is not None:
                         try:
-                            self._on_select_ckpt(Path(sel_ck))
+                            sel_path = self._ckpt_label_to_path.get(sel_label, sel_label)
+                            self._on_select_ckpt(Path(sel_path))
                         except Exception:
                             pass
 
@@ -196,21 +199,23 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                             self._on_select_dir(self.output_dir)
                         except Exception:
                             pass
-                    sel_ck = getattr(ckpt_dropdown, "value", None)
-                    if sel_ck and sel_ck != "<none>" and self._on_select_ckpt is not None:
+                    sel_label = getattr(ckpt_dropdown, "value", None)
+                    if sel_label and sel_label != "<none>" and self._on_select_ckpt is not None:
                         try:
-                            self._on_select_ckpt(Path(sel_ck))
+                            sel_path = self._ckpt_label_to_path.get(sel_label, sel_label)
+                            self._on_select_ckpt(Path(sel_path))
                         except Exception:
                             pass
 
             @ckpt_dropdown.on_update
             def _(_evt) -> None:  # noqa: ANN001
-                val = getattr(ckpt_dropdown, "value", None)
-                if not val or val == "<none>":
+                label = getattr(ckpt_dropdown, "value", None)
+                if not label or label == "<none>":
                     return
                 if self._on_select_ckpt is not None:
                     try:
-                        self._on_select_ckpt(Path(val))
+                        path = self._ckpt_label_to_path.get(label, label)
+                        self._on_select_ckpt(Path(path))
                     except Exception:
                         pass
 
@@ -355,17 +360,21 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 except Exception:
                     pass
             return
-        choices = tuple([p for p, _n in items])
+        # Map labels (basenames) to full paths for stable, readable dropdown
+        import os
+        labels = [os.path.basename(p) for p, _n in items]
+        self._ckpt_label_to_path = {lab: p for lab, (p, _n) in zip(labels, items)}
+        label_choices = tuple(labels)
         try:
-            dd.choices = choices  # type: ignore[attr-defined]
+            dd.choices = label_choices  # type: ignore[attr-defined]
         except Exception:
             try:
-                dd.options = choices  # type: ignore[attr-defined]
+                dd.options = label_choices  # type: ignore[attr-defined]
             except Exception:
                 pass
-        last = choices[-1]
+        last_label = labels[-1]
         try:
-            dd.value = last  # type: ignore[attr-defined]
+            dd.value = last_label  # type: ignore[attr-defined]
         except Exception:
             pass
         # Reflect number in numeric display
@@ -506,11 +515,12 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                     pass
             # Trigger load of selected ckpt if any
             try:
-                sel_ck = getattr(self._output_dir_handles.get("ckpt_dropdown"), "value", None)
+                sel_label = getattr(self._output_dir_handles.get("ckpt_dropdown"), "value", None)
             except Exception:
-                sel_ck = None
-            if sel_ck and sel_ck != "<none>" and self._on_select_ckpt is not None:
+                sel_label = None
+            if sel_label and sel_label != "<none>" and self._on_select_ckpt is not None:
                 try:
-                    self._on_select_ckpt(Path(sel_ck))
+                    path = self._ckpt_label_to_path.get(sel_label, sel_label)
+                    self._on_select_ckpt(Path(path))
                 except Exception:
                     pass
