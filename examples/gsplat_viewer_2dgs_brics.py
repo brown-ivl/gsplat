@@ -43,7 +43,9 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         mode: Literal["rendering", "training"] = "rendering",
         selectable_output_dirs: Iterable[PathLike] | None = None,
         section_label: str = "Input",
+        on_select_dir: Callable[[Path], None] | None = None,
     ) -> None:
+        self._on_select_dir = on_select_dir
         # Normalize and prepare selectable directories
         choices: List[Path] = []
         if selectable_output_dirs is not None:
@@ -108,6 +110,13 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                     pass
                 self.output_dir = Path(new_dir)
                 cur_path_text.value = str(self.output_dir)
+                # Notify host app to update its state (e.g., reload ckpt)
+                if self._on_select_dir is not None:
+                    try:
+                        self._on_select_dir(self.output_dir)
+                    except Exception:
+                        # Avoid crashing UI on callback errors
+                        pass
 
         # Now initialize the base viewer so our Input section stays on top
         super().__init__(server, render_fn, output_dir, mode)

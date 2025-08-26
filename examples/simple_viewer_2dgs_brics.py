@@ -17,29 +17,39 @@ def main(local_rank: int, world_rank, world_size: int, args):
     torch.manual_seed(42)
     device = torch.device("cuda", local_rank)
 
-    # Build checkpoint paths from each provided output_dir: <output_dir>/ckpts/ckpt_6999.pt
-    ckpt_paths = [Path(d) / "ckpts" / "ckpt_6999.pt" for d in args.output_dir]
+    # Mutable container to hold the currently loaded scene
+    data = {
+        "means": None,
+        "quats": None,
+        "scales": None,
+        "opacities": None,
+        "colors": None,
+        "sh_degree": None,
+    }
 
-    means, quats, scales, opacities, sh0, shN = [], [], [], [], [], []
-    for ckpt_path in ckpt_paths:
+    def load_from_dir(dir_path: Path) -> bool:
+        ckpt_path = Path(dir_path) / "ckpts" / "ckpt_6999.pt"
         if not ckpt_path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+            print(f"[viewer] Checkpoint not found: {ckpt_path}")
+            return False
         ckpt = torch.load(ckpt_path, map_location=device)["splats"]
-        means.append(ckpt["means"])
-        quats.append(F.normalize(ckpt["quats"], p=2, dim=-1))
-        scales.append(torch.exp(ckpt["scales"]))
-        opacities.append(torch.sigmoid(ckpt["opacities"]))
-        sh0.append(ckpt["sh0"])
-        shN.append(ckpt["shN"])
-    means = torch.cat(means, dim=0)
-    quats = torch.cat(quats, dim=0)
-    scales = torch.cat(scales, dim=0)
-    opacities = torch.cat(opacities, dim=0)
-    sh0 = torch.cat(sh0, dim=0)
-    shN = torch.cat(shN, dim=0)
-    colors = torch.cat([sh0, shN], dim=-2)
-    sh_degree = int(math.sqrt(colors.shape[-2]) - 1)
-    print("Number of Gaussians:", len(means))
+        means = ckpt["means"]
+        quats = F.normalize(ckpt["quats"], p=2, dim=-1)
+        scales = torch.exp(ckpt["scales"])
+        opacities = torch.sigmoid(ckpt["opacities"])
+        sh0 = ckpt["sh0"]
+        shN = ckpt["shN"]
+        colors = torch.cat([sh0, shN], dim=-2)
+        sh_degree = int(math.sqrt(colors.shape[-2]) - 1)
+
+        data["means"] = means
+        data["quats"] = quats
+        data["scales"] = scales
+        data["opacities"] = opacities
+        data["colors"] = colors
+        data["sh_degree"] = sh_degree
+        print("[viewer] Loaded:", ckpt_path)
+        return True
 
     # register and open viewer
     @torch.no_grad()
@@ -65,18 +75,18 @@ def main(local_rank: int, world_rank, world_size: int, args):
             render_median,
             info,
         ) = rasterization_2dgs(
-            means=means,
-            quats=quats,
-            scales=scales,
-            opacities=opacities,
-            colors=colors,
+            means=data["means"],
+            quats=data["quats"],
+            scales=data["scales"],
+            opacities=data["opacities"],
+            colors=data["colors"],
             viewmats=viewmat[None],
             Ks=K[None],
             width=width,
             height=height,
             sh_degree=(
-                min(render_tab_state.max_sh_degree, sh_degree)
-                if sh_degree is not None
+                min(render_tab_state.max_sh_degree, data["sh_degree"])
+                if data["sh_degree"] is not None
                 else None
             ),
             near_plane=render_tab_state.near_plane,
@@ -87,7 +97,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
             backgrounds=torch.tensor([render_tab_state.backgrounds], device=device)
             / 255.0,
         )
-        render_tab_state.total_gs_count = len(means)
+        render_tab_state.total_gs_count = len(data["means"]) if data["means"] is not None else 0
         render_tab_state.rendered_gs_count = (info["radii"] > 0).all(-1).sum().item()
 
         if render_tab_state.render_mode == "depth":
@@ -120,13 +130,19 @@ def main(local_rank: int, world_rank, world_size: int, args):
             renders = render_colors.cpu().numpy()
         return renders
 
+    # Load the initial directory before starting the server
+    initial_dir = Path(args.output_dir[0] if isinstance(args.output_dir, list) else args.output_dir)
+    if not load_from_dir(initial_dir):
+        raise FileNotFoundError(f"Initial checkpoint not found under: {initial_dir}/ckpts/ckpt_6999.pt")
+
     server = viser.ViserServer(port=args.port, verbose=False)
-    GsplatViewerBrics(
+    viewer = GsplatViewerBrics(
         server=server,
         render_fn=viewer_render_fn,
-        output_dir=Path(args.output_dir[0] if isinstance(args.output_dir, list) else args.output_dir),
+        output_dir=initial_dir,
         mode="rendering",
         selectable_output_dirs=args.output_dir,
+        on_select_dir=lambda p: (load_from_dir(p), getattr(viewer, "rerender", lambda *_: None)(None))[0],
     )
     print("Viewer running... Ctrl+C to exit.")
     time.sleep(100000)
