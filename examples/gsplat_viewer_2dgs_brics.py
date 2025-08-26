@@ -74,7 +74,17 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         if cur_gsplat_dir is None:
             cur_gsplat_dir = output_dir
 
-        # Build the Input section BEFORE initializing base UI
+        # Add a top-level Status section for prominent visibility
+        status_folder = server.gui.add_folder("Status")
+        with status_folder:
+            status_banner = server.gui.add_text(
+                "STATUS",
+                initial_value="🟢 Idle",
+                disabled=False,
+                hint="Overall viewer status.",
+            )
+
+        # Build the Input section BEFORE initializing base UI (keeps it near top)
         input_folder = server.gui.add_folder(section_label)
         with input_folder:
             base_dir_text = server.gui.add_text(
@@ -165,6 +175,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         # Keep references
         self._input_folder = input_folder
         self._output_dir_handles = {
+            "status_banner": status_banner,
             "base_dir_text": base_dir_text,
             "status_text": status_text,
             "date_dropdown": date_dropdown,
@@ -185,10 +196,23 @@ class GsplatViewerBrics(_BaseGsplatViewer):
 
     def set_loading(self, loading: bool, msg: str | None = None) -> None:
         try:
-            text = msg if msg is not None else ("Loading..." if loading else "Idle")
+            base_text = msg if msg is not None else ("Loading..." if loading else "Idle")
+            # Simple heuristic for an emoji prefix
+            if loading:
+                prefix = "🟡"
+            else:
+                low = (base_text or "").lower()
+                if any(s in low for s in ("error", "fail", "no ckpt", "no ckpts", "not found", "missing")):
+                    prefix = "🔴"
+                else:
+                    prefix = "🟢"
+            text = f"{prefix} {base_text}"
             st = self._output_dir_handles.get("status_text")  # type: ignore[attr-defined]
             if st is not None:
                 st.value = text
+            sb = self._output_dir_handles.get("status_banner")  # type: ignore[attr-defined]
+            if sb is not None:
+                sb.value = text
             # Optionally disable selectors while loading
             dd = self._output_dir_handles.get("date_dropdown")
             md = self._output_dir_handles.get("multi_dropdown")
