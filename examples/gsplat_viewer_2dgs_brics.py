@@ -115,6 +115,11 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 initial_value="<none>",
                 hint="Select a checkpoint (ckpts/ckpt_*.pt or .pth) to load.",
             )
+            # Ensure it's interactable initially
+            try:
+                ckpt_dropdown.disabled = False  # type: ignore[attr-defined]
+            except Exception:
+                pass
             ckpt_dir_text = server.gui.add_text(
                 "Checkpoint Dir",
                 initial_value=str((cur_gsplat_dir / "ckpts").resolve() if cur_gsplat_dir else ""),
@@ -320,6 +325,11 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         dd = self._output_dir_handles.get("ckpt_dropdown")
         if dd is None:
             return
+        # Ensure dropdown is enabled when updating choices
+        try:
+            dd.disabled = False  # type: ignore[attr-defined]
+        except Exception:
+            pass
         try:
             print(f"[viewer] scanning ckpts under: {gsplat_dir}")
         except Exception:
@@ -375,6 +385,11 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         last_label = labels[-1]
         try:
             dd.value = last_label  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        # Re-ensure enabled after assigning value
+        try:
+            dd.disabled = False  # type: ignore[attr-defined]
         except Exception:
             pass
         # Reflect number in numeric display
