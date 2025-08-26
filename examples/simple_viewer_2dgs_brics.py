@@ -28,11 +28,27 @@ def main(local_rank: int, world_rank, world_size: int, args):
     }
 
     def load_from_dir(dir_path: Path) -> bool:
-        ckpt_path = Path(dir_path) / "ckpts" / "ckpt_6999.pt"
-        if not ckpt_path.exists():
-            print(f"[viewer] Checkpoint not found: {ckpt_path}")
+        ckpts_dir = Path(dir_path) / "ckpts"
+        if not ckpts_dir.exists():
+            print(f"[viewer] ckpts dir not found: {ckpts_dir}")
             return False
-        ckpt = torch.load(ckpt_path, map_location=device)["splats"]
+        # Find highest ckpt_<number>.pt (also accept ckpt_<number>_rank*.pt)
+        import re
+
+        best_num = None
+        best_path = None
+        for p in ckpts_dir.glob("ckpt_*.pt"):
+            m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", p.name)
+            if not m:
+                continue
+            n = int(m.group(1))
+            if best_num is None or n > best_num:
+                best_num = n
+                best_path = p
+        if best_path is None:
+            print(f"[viewer] No matching ckpt_*.pt found under: {ckpts_dir}")
+            return False
+        ckpt = torch.load(best_path, map_location=device)["splats"]
         means = ckpt["means"]
         quats = F.normalize(ckpt["quats"], p=2, dim=-1)
         scales = torch.exp(ckpt["scales"])
@@ -48,7 +64,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
         data["opacities"] = opacities
         data["colors"] = colors
         data["sh_degree"] = sh_degree
-        print("[viewer] Loaded:", ckpt_path)
+        print("[viewer] Loaded:", best_path)
         return True
 
     # register and open viewer
@@ -133,16 +149,29 @@ def main(local_rank: int, world_rank, world_size: int, args):
     # Load the initial directory before starting the server
     initial_dir = Path(args.output_dir[0] if isinstance(args.output_dir, list) else args.output_dir)
     if not load_from_dir(initial_dir):
-        raise FileNotFoundError(f"Initial checkpoint not found under: {initial_dir}/ckpts/ckpt_6999.pt")
+        raise FileNotFoundError(
+            f"No checkpoints matching 'ckpt_*.pt' found under: {initial_dir}/ckpts"
+        )
 
     server = viser.ViserServer(port=args.port, verbose=False)
+
+    viewer = None  # will be set after construction
+
+    def _on_select_dir(p: Path):
+        if load_from_dir(p):
+            if viewer is not None and hasattr(viewer, "rerender"):
+                try:
+                    viewer.rerender(None)
+                except Exception:
+                    pass
+
     viewer = GsplatViewerBrics(
         server=server,
         render_fn=viewer_render_fn,
         output_dir=initial_dir,
         mode="rendering",
         selectable_output_dirs=args.output_dir,
-        on_select_dir=lambda p: (load_from_dir(p), getattr(viewer, "rerender", lambda *_: None)(None))[0],
+        on_select_dir=_on_select_dir,
     )
     print("Viewer running... Ctrl+C to exit.")
     time.sleep(100000)
