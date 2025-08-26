@@ -230,22 +230,26 @@ def main(local_rank: int, world_rank, world_size: int, args):
             depth_norm = torch.clip(depth_norm, 0, 1)
             if render_tab_state.inverse:
                 depth_norm = 1 - depth_norm
-            renders = (
-                apply_float_colormap(depth_norm, render_tab_state.colormap)
-                .cpu()
-                .numpy()
-            )
+            # Apply colormap to batch 0 and return HxWx3
+            renders = apply_float_colormap(depth_norm, render_tab_state.colormap).cpu().numpy()
         elif render_tab_state.render_mode == "normal":
-            render_normals = render_normals * 0.5 + 0.5
+            # Expect HxWx3 image; select batch 0 and clamp to [0,1]
+            render_normals = render_normals[0, ..., 0:3] * 0.5 + 0.5
+            render_normals = render_normals.clamp(0, 1)
             renders = render_normals.cpu().numpy()
         elif render_tab_state.render_mode == "alpha":
+            # Expect a single-channel [H,W,1] for colormap application
             alpha = render_alphas[0, ..., 0:1]
-            renders = (
-                apply_float_colormap(alpha, render_tab_state.colormap).cpu().numpy()
-            )
+            renders = apply_float_colormap(alpha, render_tab_state.colormap).cpu().numpy()
         else:
             render_colors = render_colors[0, ..., 0:3].clamp(0, 1)
             renders = render_colors.cpu().numpy()
+        # Final shape guard: ensure HxWx3/4 for viser
+        if isinstance(renders, np.ndarray):
+            if renders.ndim == 4 and renders.shape[0] == 1:
+                renders = renders[0]
+            if renders.ndim == 3 and renders.shape[-1] not in (3, 4) and renders.shape[0] in (3, 4):
+                renders = np.transpose(renders, (1, 2, 0))
         return renders
 
     # Resolve an initial gsplat_2dgs directory from base_dir/defaults

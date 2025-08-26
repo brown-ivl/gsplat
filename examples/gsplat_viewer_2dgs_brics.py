@@ -338,7 +338,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         try:
             print(f"[viewer] found {len(items)} ckpt(s)")
         except Exception:
-            pass
+            print("[viewer] _scan_ckpt_files failed to return any")
         # Update UI debug fields
         try:
             dtext = self._output_dir_handles.get("ckpt_dir_text")
@@ -368,7 +368,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                     dd.options = tuple(["<none>"])  # type: ignore[attr-defined]
                     dd.value = "<none>"  # type: ignore[attr-defined]
                 except Exception:
-                    pass
+                    print("[viewer] failed to set ckpt dropdown to <none>")
             return
         # Map labels (basenames) to full paths for stable, readable dropdown
         import os
@@ -381,23 +381,23 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             try:
                 dd.options = label_choices  # type: ignore[attr-defined]
             except Exception:
-                pass
+                print("[viewer] failed to set ckpt dropdown options")
         last_label = labels[-1]
         try:
             dd.value = last_label  # type: ignore[attr-defined]
         except Exception:
-            pass
+            print("[viewer] failed to set ckpt dropdown value")
         # Re-ensure enabled after assigning value
         try:
             dd.disabled = False  # type: ignore[attr-defined]
         except Exception:
-            pass
+            print("[viewer] failed to enable ckpt dropdown")
         # Reflect number in numeric display
         try:
             nums = [n for _p, n in items]
             self.set_checkpoint_number(nums[-1] if nums else 0)
         except Exception:
-            pass
+            print("[viewer] failed to set checkpoint number")
 
     def _resolve_gsplat_dir(self, date_label: str | None, multi_label: str | None) -> Path | None:
         if date_label is None or multi_label is None:
