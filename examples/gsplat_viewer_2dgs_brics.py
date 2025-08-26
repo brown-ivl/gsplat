@@ -93,12 +93,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 disabled=True,
                 hint="Root folder scanned for dates/multisequences.",
             )
-            status_text = server.gui.add_text(
-                "Status",
-                initial_value="Idle",
-                disabled=True,
-                hint="Loading status for checkpoints.",
-            )
             date_dropdown = server.gui.add_dropdown(
                 "Date",
                 tuple(date_labels),
@@ -177,7 +171,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         self._output_dir_handles = {
             "status_banner": status_banner,
             "base_dir_text": base_dir_text,
-            "status_text": status_text,
             "date_dropdown": date_dropdown,
             "multi_dropdown": multi_dropdown,
             "cur_path_text": cur_path_text,
@@ -207,9 +200,6 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 else:
                     prefix = "🟢"
             text = f"{prefix} {base_text}"
-            st = self._output_dir_handles.get("status_text")  # type: ignore[attr-defined]
-            if st is not None:
-                st.value = text
             sb = self._output_dir_handles.get("status_banner")  # type: ignore[attr-defined]
             if sb is not None:
                 sb.value = text
