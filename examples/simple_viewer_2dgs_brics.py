@@ -148,13 +148,6 @@ def main(local_rank: int, world_rank, world_size: int, args):
             renders = render_colors.cpu().numpy()
         return renders
 
-    # Load the initial directory before starting the server
-    initial_dir = Path(args.output_dir[0] if isinstance(args.output_dir, list) else args.output_dir)
-    if not load_from_dir(initial_dir):
-        raise FileNotFoundError(
-            f"No checkpoints matching 'ckpt_*.pt' found under: {initial_dir}/ckpts"
-        )
-
     server = viser.ViserServer(port=args.port, verbose=False)
 
     viewer = None  # will be set after construction
@@ -175,15 +168,30 @@ def main(local_rank: int, world_rank, world_size: int, args):
     viewer = GsplatViewerBrics(
         server=server,
         render_fn=viewer_render_fn,
-        output_dir=initial_dir,
+        output_dir=Path(args.base_dir),
         mode="rendering",
-        selectable_output_dirs=args.output_dir,
+        base_dir=Path(args.base_dir),
+        default_date=args.default_date,
+        default_multiseq=args.default_multiseq,
         on_select_dir=_on_select_dir,
     )
-    # Set the initial checkpoint number in the UI
+    # Initial load for the selected directory resolved by the viewer
     try:
-        viewer.set_checkpoint_number(data.get("ckpt_num"))
+        if load_from_dir(Path(viewer.output_dir)):
+            try:
+                viewer.set_checkpoint_number(data.get("ckpt_num"))
+            except Exception:
+                pass
+            try:
+                viewer.rerender(None)
+            except Exception:
+                pass
+        else:
+            raise FileNotFoundError(
+                f"No checkpoints found under: {Path(viewer.output_dir)}/ckpts"
+            )
     except Exception:
+        # Keep the server running; user can change selection in UI
         pass
     print("Viewer running... Ctrl+C to exit.")
     time.sleep(100000)
@@ -192,11 +200,22 @@ def main(local_rank: int, world_rank, world_size: int, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--output_dir",
+        "--base_dir",
         type=str,
-        nargs="+",
-        default=["results/"],
-        help="One or more directories where viewer can write outputs; selectable at runtime.",
+        required=True,
+        help="Base directory containing <YYYY-MM-DD>/multisequence*/gsplat_2dgs",
+    )
+    parser.add_argument(
+        "--default_date",
+        type=str,
+        default=None,
+        help="Optional default date (YYYY-MM-DD) to preselect.",
+    )
+    parser.add_argument(
+        "--default_multiseq",
+        type=str,
+        default=None,
+        help="Optional default multisequence name to preselect (e.g., multisequence3).",
     )
     parser.add_argument(
         "--port", type=int, default=8080, help="port for the viewer server"

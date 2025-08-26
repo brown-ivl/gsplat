@@ -41,55 +41,81 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         render_fn: Callable,
         output_dir: Path,
         mode: Literal["rendering", "training"] = "rendering",
-        selectable_output_dirs: Iterable[PathLike] | None = None,
+        *,
+        base_dir: PathLike,
         section_label: str = "Input",
         on_select_dir: Callable[[Path], None] | None = None,
+        default_date: str | None = None,
+        default_multiseq: str | None = None,
     ) -> None:
         self._on_select_dir = on_select_dir
-        # Normalize and prepare selectable directories
-        choices: List[Path] = []
-        if selectable_output_dirs is not None:
-            for p in selectable_output_dirs:
-                try:
-                    pp = Path(p).expanduser().resolve()
-                except Exception:
-                    # Fallback to Path without resolve if path doesn't exist yet
-                    pp = Path(p).expanduser()
-                if pp not in choices:
-                    choices.append(pp)
+        self._base_dir = Path(base_dir).expanduser()
 
-        # Always include the initially provided output_dir as a choice (first)
-        try:
-            initial_dir = Path(output_dir).expanduser().resolve()
-        except Exception:
-            initial_dir = Path(output_dir).expanduser()
-        if initial_dir not in choices:
-            choices.insert(0, initial_dir)
-        else:
-            # Ensure the initial choice is the first
-            choices = [initial_dir] + [c for c in choices if c != initial_dir]
+        # Scan dates and multisequences
+        self._date_to_multis: Dict[str, List[str]] = {}
+        date_labels: List[str] = []
+        for d in sorted(self._base_dir.iterdir() if self._base_dir.exists() else []):
+            if not d.is_dir():
+                continue
+            name = d.name
+            # Expect YYYY-MM-DD
+            if len(name) == 10 and name[4] == "-" and name[7] == "-" and name.replace("-", "").isdigit():
+                # Collect multisequence subdirs that contain gsplat_2dgs
+                multis: List[str] = []
+                for m in sorted(d.iterdir()):
+                    if not m.is_dir():
+                        continue
+                    if m.name.startswith("multisequence") and (m / "gsplat_2dgs").exists():
+                        multis.append(m.name)
+                if multis:
+                    date_labels.append(name)
+                    self._date_to_multis[name] = multis
 
-        # Store choices and label map early so our helper can use them
-        self._output_dir_choices = list(choices)
-        self._label_to_path: Dict[str, Path] = {}
-        used_labels: set[str] = set()
-        for idx, p in enumerate(self._output_dir_choices):
-            base = p.name or str(p)
-            label = base
-            if label in used_labels:
-                label = f"{base} ({idx})"
-            used_labels.add(label)
-            self._label_to_path[label] = p
+        if not date_labels:
+            # Fallback to provided output_dir only
+            date_labels = ["unknown"]
+            self._date_to_multis["unknown"] = ["multisequence0"]
 
-        # Build the small GUI to switch directory BEFORE initializing base UI,
-        # so it appears at the top of the panel.
+        # Choose defaults
+        cur_date = default_date if default_date in date_labels else date_labels[-1]
+        multis_for_date = self._date_to_multis.get(cur_date, [])
+        if not multis_for_date:
+            multis_for_date = ["multisequence0"]
+        cur_multi = (
+            default_multiseq if default_multiseq in multis_for_date else multis_for_date[-1]
+        )
+
+        # Resolve current gsplat directory
+        cur_gsplat_dir = self._resolve_gsplat_dir(cur_date, cur_multi)
+        if cur_gsplat_dir is None:
+            cur_gsplat_dir = output_dir
+
+        # Build the Input section BEFORE initializing base UI
         input_folder = server.gui.add_folder(section_label)
         with input_folder:
+            base_dir_text = server.gui.add_text(
+                "Base Directory",
+                initial_value=str(self._base_dir),
+                disabled=True,
+                hint="Root folder scanned for dates/multisequences.",
+            )
+            date_dropdown = server.gui.add_dropdown(
+                "Date",
+                tuple(date_labels),
+                initial_value=cur_date,
+                hint="Date folder (YYYY-MM-DD)",
+            )
+            multi_dropdown = server.gui.add_dropdown(
+                "Multisequence",
+                tuple(multis_for_date),
+                initial_value=cur_multi,
+                hint="Select multisequence under the chosen date.",
+            )
             cur_path_text = server.gui.add_text(
                 "Current Directory",
-                initial_value=str(initial_dir),
+                initial_value=str(cur_gsplat_dir),
                 disabled=True,
-                hint="Dir used by viewer. Loads ckpt from <dir>/ckpts/ckpt_6999.pt.",
+                hint="Selected <date>/<multisequence>/gsplat_2dgs path.",
             )
             ckpt_number = server.gui.add_number(
                 "Checkpoint",
@@ -97,40 +123,61 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 disabled=True,
                 hint="Highest ckpt_<number>.pt loaded from the directory.",
             )
-            dropdown = server.gui.add_dropdown(
-                "Select Directory",
-                tuple(self._label_to_path.keys()),
-                initial_value=self._label_for_path(initial_dir),
-                hint="Choose where to load inputs/save outputs.",
-            )
 
-            @dropdown.on_update
+            @date_dropdown.on_update
             def _(_evt) -> None:  # noqa: ANN001
-                label = dropdown.value
-                new_dir = self._label_to_path.get(label)
-                if new_dir is None:
-                    return
+                # Update multisequence choices for the new date
+                new_date = date_dropdown.value
+                new_multis = tuple(self._date_to_multis.get(new_date, []))
                 try:
-                    Path(new_dir).mkdir(parents=True, exist_ok=True)
+                    # Update dropdown choices and reset value
+                    multi_dropdown.choices = new_multis  # type: ignore[attr-defined]
                 except Exception:
-                    pass
-                self.output_dir = Path(new_dir)
-                cur_path_text.value = str(self.output_dir)
-                # Notify host app to update its state (e.g., reload ckpt)
-                if self._on_select_dir is not None:
                     try:
-                        self._on_select_dir(self.output_dir)
+                        multi_dropdown.options = new_multis  # type: ignore[attr-defined]
                     except Exception:
-                        # Avoid crashing UI on callback errors
                         pass
+                if new_multis:
+                    try:
+                        multi_dropdown.value = new_multis[-1]  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                sel_multi = getattr(multi_dropdown, "value", None) or (
+                    new_multis[-1] if new_multis else None
+                )
+                new_dir = self._resolve_gsplat_dir(new_date, sel_multi)
+                if new_dir is not None:
+                    self.output_dir = new_dir
+                    cur_path_text.value = str(self.output_dir)
+                    if self._on_select_dir is not None:
+                        try:
+                            self._on_select_dir(self.output_dir)
+                        except Exception:
+                            pass
 
-        # Now initialize the base viewer so our Input section stays on top
-        super().__init__(server, render_fn, output_dir, mode)
+            @multi_dropdown.on_update
+            def _(_evt) -> None:  # noqa: ANN001
+                new_date = date_dropdown.value
+                new_multi = multi_dropdown.value
+                new_dir = self._resolve_gsplat_dir(new_date, new_multi)
+                if new_dir is not None:
+                    self.output_dir = new_dir
+                    cur_path_text.value = str(self.output_dir)
+                    if self._on_select_dir is not None:
+                        try:
+                            self._on_select_dir(self.output_dir)
+                        except Exception:
+                            pass
 
-        # Keep a reference for potential future updates
+        # Initialize the base viewer so Input section stays on top
+        super().__init__(server, render_fn, cur_gsplat_dir, mode)
+
+        # Keep references
         self._input_folder = input_folder
         self._output_dir_handles = {
-            "dropdown": dropdown,
+            "base_dir_text": base_dir_text,
+            "date_dropdown": date_dropdown,
+            "multi_dropdown": multi_dropdown,
             "cur_path_text": cur_path_text,
             "ckpt_number": ckpt_number,
         }
@@ -147,16 +194,14 @@ class GsplatViewerBrics(_BaseGsplatViewer):
 
     # Utility to find a label given a path value
     def _label_for_path(self, p: PathLike) -> str:
-        p = Path(p)
-        for label, path in self._label_to_path.items():
-            # Resolve may raise; compare as-is first
-            if path == p:
-                return label
-            try:
-                if path.resolve() == p.resolve():
-                    return label
-            except Exception:
-                # If resolve fails for either, skip
-                pass
-        # Fallback to first label
-        return next(iter(self._label_to_path.keys()))
+        # Legacy helper retained for compatibility; unused in new base-dir mode.
+        return str(Path(p))
+
+    def _resolve_gsplat_dir(self, date_label: str | None, multi_label: str | None) -> Path | None:
+        if date_label is None or multi_label is None:
+            return None
+        d = self._base_dir / date_label / multi_label / "gsplat_2dgs"
+        try:
+            return d.resolve()
+        except Exception:
+            return d
