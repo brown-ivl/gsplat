@@ -91,6 +91,12 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 disabled=True,
                 hint="Dir used by viewer. Loads ckpt from <dir>/ckpts/ckpt_6999.pt.",
             )
+            ckpt_number = server.gui.add_number(
+                "Checkpoint",
+                initial_value=0,
+                disabled=True,
+                hint="Highest ckpt_<number>.pt loaded from the directory.",
+            )
             dropdown = server.gui.add_dropdown(
                 "Select Directory",
                 tuple(self._label_to_path.keys()),
@@ -123,7 +129,21 @@ class GsplatViewerBrics(_BaseGsplatViewer):
 
         # Keep a reference for potential future updates
         self._input_folder = input_folder
-        self._output_dir_handles = {"dropdown": dropdown, "cur_path_text": cur_path_text}
+        self._output_dir_handles = {
+            "dropdown": dropdown,
+            "cur_path_text": cur_path_text,
+            "ckpt_number": ckpt_number,
+        }
+
+    def set_checkpoint_number(self, number: int | None) -> None:
+        try:
+            h = self._output_dir_handles.get("ckpt_number")  # type: ignore[attr-defined]
+            if h is None:
+                return
+            h.value = int(number) if number is not None else 0
+        except Exception:
+            # UI update failures should not break the viewer
+            pass
 
     # Utility to find a label given a path value
     def _label_for_path(self, p: PathLike) -> str:

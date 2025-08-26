@@ -25,6 +25,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
         "opacities": None,
         "colors": None,
         "sh_degree": None,
+        "ckpt_num": None,
     }
 
     def load_from_dir(dir_path: Path) -> bool:
@@ -35,14 +36,14 @@ def main(local_rank: int, world_rank, world_size: int, args):
         # Find highest ckpt_<number>.pt (also accept ckpt_<number>_rank*.pt)
         import re
 
-        best_num = None
+        best_num = -1
         best_path = None
         for p in ckpts_dir.glob("ckpt_*.pt"):
             m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.pt$", p.name)
             if not m:
                 continue
             n = int(m.group(1))
-            if best_num is None or n > best_num:
+            if n > best_num:
                 best_num = n
                 best_path = p
         if best_path is None:
@@ -64,6 +65,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
         data["opacities"] = opacities
         data["colors"] = colors
         data["sh_degree"] = sh_degree
+        data["ckpt_num"] = best_num
         print("[viewer] Loaded:", best_path)
         return True
 
@@ -161,6 +163,11 @@ def main(local_rank: int, world_rank, world_size: int, args):
         if load_from_dir(p):
             if viewer is not None and hasattr(viewer, "rerender"):
                 try:
+                    # Update the checkpoint number in the UI
+                    try:
+                        viewer.set_checkpoint_number(data.get("ckpt_num"))
+                    except Exception:
+                        pass
                     viewer.rerender(None)
                 except Exception:
                     pass
@@ -173,6 +180,11 @@ def main(local_rank: int, world_rank, world_size: int, args):
         selectable_output_dirs=args.output_dir,
         on_select_dir=_on_select_dir,
     )
+    # Set the initial checkpoint number in the UI
+    try:
+        viewer.set_checkpoint_number(data.get("ckpt_num"))
+    except Exception:
+        pass
     print("Viewer running... Ctrl+C to exit.")
     time.sleep(100000)
 
