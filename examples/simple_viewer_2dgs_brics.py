@@ -1,6 +1,7 @@
 import argparse
 import math
 import time
+import threading
 from pathlib import Path
 
 import torch
@@ -243,6 +244,20 @@ def main(local_rank: int, world_rank, world_size: int, args):
         default_multiseq=args.default_multiseq,
         on_select_dir=_on_select_dir,
     )
+    # Periodically refresh base_dir every 10 minutes in the background
+    def _periodic_refresh():
+        while True:
+            try:
+                time.sleep(600)
+                if hasattr(viewer, "refresh_base_dir"):
+                    viewer.refresh_base_dir()
+                    print("[viewer] base_dir refreshed")
+            except Exception:
+                # Keep the thread alive despite transient issues
+                pass
+
+    t = threading.Thread(target=_periodic_refresh, daemon=True)
+    t.start()
     # If we loaded initially, reflect checkpoint number and render once
     if data["means"] is not None:
         try:

@@ -53,23 +53,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
 
         # Scan dates and multisequences
         self._date_to_multis: Dict[str, List[str]] = {}
-        date_labels: List[str] = []
-        for d in sorted(self._base_dir.iterdir() if self._base_dir.exists() else []):
-            if not d.is_dir():
-                continue
-            name = d.name
-            # Expect YYYY-MM-DD
-            if len(name) == 10 and name[4] == "-" and name[7] == "-" and name.replace("-", "").isdigit():
-                # Collect multisequence subdirs that contain gsplat_2dgs
-                multis: List[str] = []
-                for m in sorted(d.iterdir()):
-                    if not m.is_dir():
-                        continue
-                    if m.name.startswith("multisequence") and (m / "gsplat_2dgs").exists():
-                        multis.append(m.name)
-                if multis:
-                    date_labels.append(name)
-                    self._date_to_multis[name] = multis
+        date_labels = self._scan_base_dir()
 
         if not date_labels:
             # Fallback to provided output_dir only
@@ -231,3 +215,103 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             return d.resolve()
         except Exception:
             return d
+
+    def _scan_base_dir(self) -> List[str]:
+        self._date_to_multis.clear()
+        date_labels: List[str] = []
+        try:
+            it = self._base_dir.iterdir() if self._base_dir.exists() else []
+            for d in sorted(it):
+                if not d.is_dir():
+                    continue
+                name = d.name
+                if (
+                    len(name) == 10
+                    and name[4] == "-"
+                    and name[7] == "-"
+                    and name.replace("-", "").isdigit()
+                ):
+                    multis: List[str] = []
+                    for m in sorted(d.iterdir()):
+                        if not m.is_dir():
+                            continue
+                        if m.name.startswith("multisequence") and (m / "gsplat_2dgs").exists():
+                            multis.append(m.name)
+                    if multis:
+                        date_labels.append(name)
+                        self._date_to_multis[name] = multis
+        except Exception:
+            pass
+        return date_labels
+
+    def refresh_base_dir(self) -> None:
+        """Rescan base_dir and update dropdowns. Keep current selection if possible.
+
+        If current selection disappears, pick the last available. If selection
+        changes, update current directory and invoke on_select_dir.
+        """
+        try:
+            prev_date = getattr(self._output_dir_handles.get("date_dropdown"), "value", None)
+            prev_multi = getattr(self._output_dir_handles.get("multi_dropdown"), "value", None)
+        except Exception:
+            prev_date = None
+            prev_multi = None
+
+        date_labels = self._scan_base_dir()
+        if not date_labels:
+            return
+
+        dd = self._output_dir_handles.get("date_dropdown")
+        md = self._output_dir_handles.get("multi_dropdown")
+        cur_path_text = self._output_dir_handles.get("cur_path_text")
+
+        # Update date dropdown choices
+        new_dates = tuple(date_labels)
+        try:
+            dd.choices = new_dates  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                dd.options = new_dates  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+        # Choose date
+        cur_date = prev_date if prev_date in date_labels else date_labels[-1]
+        try:
+            dd.value = cur_date  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Update multisequence choices
+        multis = self._date_to_multis.get(cur_date, [])
+        new_multis = tuple(multis)
+        try:
+            md.choices = new_multis  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                md.options = new_multis  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        cur_multi = prev_multi if prev_multi in multis else (multis[-1] if multis else None)
+        if cur_multi is None:
+            return
+        try:
+            md.value = cur_multi  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Resolve and update current directory
+        new_dir = self._resolve_gsplat_dir(cur_date, cur_multi)
+        if new_dir is None:
+            return
+        if Path(self.output_dir) != new_dir:
+            self.output_dir = new_dir
+            try:
+                cur_path_text.value = str(self.output_dir)
+            except Exception:
+                pass
+            if self._on_select_dir is not None:
+                try:
+                    self._on_select_dir(self.output_dir)
+                except Exception:
+                    pass
