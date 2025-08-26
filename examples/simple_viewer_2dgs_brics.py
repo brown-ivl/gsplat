@@ -30,9 +30,21 @@ def main(local_rank: int, world_rank, world_size: int, args):
     }
 
     def load_from_dir(dir_path: Path) -> bool:
+        # Inform UI we’re loading
+        try:
+            if viewer is not None:
+                viewer.set_loading(True, f"Loading from {dir_path}...")
+        except Exception:
+            pass
+
         ckpts_dir = Path(dir_path) / "ckpts"
         if not ckpts_dir.exists():
             print(f"[viewer] ckpts dir not found: {ckpts_dir}")
+            try:
+                if viewer is not None:
+                    viewer.set_loading(False, f"No ckpts: {ckpts_dir}")
+            except Exception:
+                pass
             return False
         # Find highest ckpt_<number>.pt (also accept ckpt_<number>_rank*.pt)
         import re
@@ -49,6 +61,11 @@ def main(local_rank: int, world_rank, world_size: int, args):
                 best_path = p
         if best_path is None:
             print(f"[viewer] No matching ckpt_*.pt found under: {ckpts_dir}")
+            try:
+                if viewer is not None:
+                    viewer.set_loading(False, f"No ckpt_*.pt in {ckpts_dir}")
+            except Exception:
+                pass
             return False
         ckpt = torch.load(best_path, map_location=device)["splats"]
         means = ckpt["means"]
@@ -68,6 +85,11 @@ def main(local_rank: int, world_rank, world_size: int, args):
         data["sh_degree"] = sh_degree
         data["ckpt_num"] = best_num
         print("[viewer] Loaded:", best_path)
+        try:
+            if viewer is not None:
+                viewer.set_loading(False, f"Loaded {best_path.name}")
+        except Exception:
+            pass
         return True
 
     # register and open viewer

@@ -99,6 +99,12 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 disabled=True,
                 hint="Root folder scanned for dates/multisequences.",
             )
+            status_text = server.gui.add_text(
+                "Status",
+                initial_value="Idle",
+                disabled=True,
+                hint="Loading status for checkpoints.",
+            )
             date_dropdown = server.gui.add_dropdown(
                 "Date",
                 tuple(date_labels),
@@ -176,6 +182,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         self._input_folder = input_folder
         self._output_dir_handles = {
             "base_dir_text": base_dir_text,
+            "status_text": status_text,
             "date_dropdown": date_dropdown,
             "multi_dropdown": multi_dropdown,
             "cur_path_text": cur_path_text,
@@ -190,6 +197,25 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             h.value = int(number) if number is not None else 0
         except Exception:
             # UI update failures should not break the viewer
+            pass
+
+    def set_loading(self, loading: bool, msg: str | None = None) -> None:
+        try:
+            text = msg if msg is not None else ("Loading..." if loading else "Idle")
+            st = self._output_dir_handles.get("status_text")  # type: ignore[attr-defined]
+            if st is not None:
+                st.value = text
+            # Optionally disable selectors while loading
+            dd = self._output_dir_handles.get("date_dropdown")
+            md = self._output_dir_handles.get("multi_dropdown")
+            for w in (dd, md):
+                if w is None:
+                    continue
+                try:
+                    w.disabled = bool(loading)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+        except Exception:
             pass
 
     # Utility to find a label given a path value
