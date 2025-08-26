@@ -50,15 +50,15 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         date_labels = self._scan_date_labels()
         if not date_labels:
             date_labels = ["unknown"]
-            self._date_to_multis["unknown"] = ["multisequence000001"]
+            self._date_to_multis["unknown"] = []
 
         # Choose defaults
         cur_date = default_date if (default_date in date_labels) else date_labels[-1]
         multis_for_date = self._scan_multis_for_date(cur_date)
-        if not multis_for_date:
-            multis_for_date = ["multisequence000001"]
         cur_multi = (
-            default_multiseq if (default_multiseq in multis_for_date) else multis_for_date[-1]
+            default_multiseq
+            if (default_multiseq in multis_for_date)
+            else (multis_for_date[-1] if multis_for_date else None)
         )
 
         # Resolve current gsplat directory
@@ -91,12 +91,24 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 initial_value=cur_date,
                 hint="Date folder (YYYY-MM-DD)",
             )
-            multi_dropdown = server.gui.add_dropdown(
-                "Multisequence",
-                tuple(multis_for_date),
-                initial_value=cur_multi,
-                hint="Select multisequence under the chosen date.",
-            )
+            if multis_for_date:
+                multi_dropdown = server.gui.add_dropdown(
+                    "Multisequence",
+                    tuple(multis_for_date),
+                    initial_value=cur_multi,
+                    hint="Select multisequence under the chosen date.",
+                )
+            else:
+                multi_dropdown = server.gui.add_dropdown(
+                    "Multisequence",
+                    tuple(["<none>"]),
+                    initial_value="<none>",
+                    hint="No multisequence found under the chosen date.",
+                )
+                try:
+                    multi_dropdown.disabled = True  # type: ignore[attr-defined]
+                except Exception:
+                    pass
             ckpt_dropdown = server.gui.add_dropdown(
                 "Checkpoint",
                 tuple(["<none>"]),
@@ -113,16 +125,33 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             def _(_evt) -> None:  # noqa: ANN001
                 new_date = date_dropdown.value
                 new_multis = tuple(self._scan_multis_for_date(new_date))
-                try:
-                    multi_dropdown.choices = new_multis  # type: ignore[attr-defined]
-                except Exception:
-                    try:
-                        multi_dropdown.options = new_multis  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
                 if new_multis:
                     try:
+                        multi_dropdown.choices = new_multis  # type: ignore[attr-defined]
+                    except Exception:
+                        try:
+                            multi_dropdown.options = new_multis  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                    try:
                         multi_dropdown.value = new_multis[-1]  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    try:
+                        multi_dropdown.disabled = False  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        multi_dropdown.choices = tuple(["<none>"])  # type: ignore[attr-defined]
+                    except Exception:
+                        try:
+                            multi_dropdown.options = tuple(["<none>"])  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                    try:
+                        multi_dropdown.value = "<none>"  # type: ignore[attr-defined]
+                        multi_dropdown.disabled = True  # type: ignore[attr-defined]
                     except Exception:
                         pass
                 sel_multi = getattr(multi_dropdown, "value", None) or (
