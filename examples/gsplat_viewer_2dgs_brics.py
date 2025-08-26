@@ -113,6 +113,17 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 initial_value="<none>",
                 hint="Select a checkpoint (ckpts/ckpt_*.pt or .pth) to load.",
             )
+            refresh_ckpts_btn = server.gui.add_button(
+                "Refresh ckpts",
+                hint="Rescan the current directory for checkpoint files.",
+            )
+
+            @refresh_ckpts_btn.on_click
+            def _(_evt) -> None:  # noqa: ANN001
+                try:
+                    self._update_ckpt_dropdown(self.output_dir)
+                except Exception:
+                    pass
 
             @date_dropdown.on_update
             def _(_evt) -> None:  # noqa: ANN001
@@ -198,6 +209,7 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             "cur_path_text": cur_path_text,
             "ckpt_number": ckpt_number,
             "ckpt_dropdown": ckpt_dropdown,
+            "refresh_ckpts_btn": refresh_ckpts_btn,
         }
 
         # Populate checkpoint list initially
@@ -263,6 +275,18 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                         continue
                     seen.add(full)
                     out.append((full, int(m.group(1))))
+        if not out:
+            # Fallback: recursive search under gsplat dir (handles non-standard layouts)
+            for ext in ("pt", "pth"):
+                for p in Path(gsplat_dir).rglob(f"ckpt_*.{ext}"):
+                    m = re.match(r"^ckpt_(\d+)(?:_rank\d+)?\.(?:pt|pth)$", p.name)
+                    if not m:
+                        continue
+                    full = str(p.resolve())
+                    if full in seen:
+                        continue
+                    seen.add(full)
+                    out.append((full, int(m.group(1))))
         out.sort(key=lambda t: t[1])
         return out
 
@@ -270,7 +294,15 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         dd = self._output_dir_handles.get("ckpt_dropdown")
         if dd is None:
             return
+        try:
+            print(f"[viewer] scanning ckpts under: {gsplat_dir}")
+        except Exception:
+            pass
         items = self._scan_ckpt_files(gsplat_dir)
+        try:
+            print(f"[viewer] found {len(items)} ckpt(s)")
+        except Exception:
+            pass
         if not items:
             try:
                 dd.choices = tuple(["<none>"])  # type: ignore[attr-defined]
