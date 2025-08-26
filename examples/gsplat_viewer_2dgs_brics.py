@@ -113,6 +113,24 @@ class GsplatViewerBrics(_BaseGsplatViewer):
                 initial_value="<none>",
                 hint="Select a checkpoint (ckpts/ckpt_*.pt or .pth) to load.",
             )
+            ckpt_dir_text = server.gui.add_text(
+                "Checkpoint Dir",
+                initial_value=str((cur_gsplat_dir / "ckpts").resolve() if cur_gsplat_dir else ""),
+                disabled=True,
+                hint="Directory being scanned for checkpoints.",
+            )
+            ckpt_count_text = server.gui.add_text(
+                "Checkpoint Count",
+                initial_value="0",
+                disabled=True,
+                hint="Number of checkpoints found in the directory.",
+            )
+            ckpt_list_text = server.gui.add_text(
+                "Checkpoint Files",
+                initial_value="",
+                disabled=True,
+                hint="List of detected checkpoint files (basenames).",
+            )
             refresh_ckpts_btn = server.gui.add_button(
                 "Refresh ckpts",
                 hint="Rescan the current directory for checkpoint files.",
@@ -209,6 +227,9 @@ class GsplatViewerBrics(_BaseGsplatViewer):
             "cur_path_text": cur_path_text,
             "ckpt_number": ckpt_number,
             "ckpt_dropdown": ckpt_dropdown,
+            "ckpt_dir_text": ckpt_dir_text,
+            "ckpt_count_text": ckpt_count_text,
+            "ckpt_list_text": ckpt_list_text,
             "refresh_ckpts_btn": refresh_ckpts_btn,
         }
 
@@ -301,6 +322,26 @@ class GsplatViewerBrics(_BaseGsplatViewer):
         items = self._scan_ckpt_files(gsplat_dir)
         try:
             print(f"[viewer] found {len(items)} ckpt(s)")
+        except Exception:
+            pass
+        # Update UI debug fields
+        try:
+            dtext = self._output_dir_handles.get("ckpt_dir_text")
+            ctext = self._output_dir_handles.get("ckpt_count_text")
+            ltext = self._output_dir_handles.get("ckpt_list_text")
+            if dtext is not None:
+                # Prefer gsplat_dir/ckpts if exists
+                p = (Path(gsplat_dir) / "ckpts") if gsplat_dir is not None else None
+                if p is not None:
+                    dtext.value = str(p.resolve())
+            if ctext is not None:
+                ctext.value = str(len(items))
+            if ltext is not None:
+                try:
+                    import os
+                    ltext.value = ", ".join([os.path.basename(p) for p, _n in items])
+                except Exception:
+                    ltext.value = ""
         except Exception:
             pass
         if not items:
